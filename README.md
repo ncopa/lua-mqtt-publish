@@ -15,7 +15,7 @@ messages = {
 
 publish.multiple(messages, hostname, port)
 
-publish.single("test/single", "datasingle", hostname, port)
+publish.single("test/single", "datasingle", nil, nil, hostname, port)
 
 ```
 
