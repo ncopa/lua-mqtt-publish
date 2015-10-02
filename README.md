@@ -17,6 +17,12 @@ publish.multiple(messages, hostname, port)
 
 publish.single("test/single", "datasingle", nil, nil, hostname, port)
 
+-- set default hostname and port
+publish.hostname = hostname
+publish.port = port
+
+publish.single("test/single", "second datasingle")
+
 ```
 
 ## Dependencies
