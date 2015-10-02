@@ -23,7 +23,8 @@ function publish.multiple(msgs, hostname, port, client_id, keepalive)
 		end
 	end
 
-	client:connect(hostname, port, keepalive)
+	client:connect(hostname or publish.hostname, port or publish.port,
+		       keepalive or publish.keepalive)
 	client:loop_forever()
 end
 
