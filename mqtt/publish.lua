@@ -26,6 +26,7 @@ function publish.multiple(msgs, hostname, port, client_id, keepalive)
 	client:connect(hostname or publish.hostname, port or publish.port,
 		       keepalive or publish.keepalive)
 	client:loop_forever()
+	client:destroy()
 end
 
 function publish.single(topic, payload, qos, retain, hostname, port, client_id,
