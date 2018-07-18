@@ -3,6 +3,18 @@
 local mqtt = require("mosquitto")
 local publish = {}
 
+function publish.tls_set(cafile, capath, certfile, keyfile)
+	if type(cafile) == "table" then
+		publish.tls = cafile
+	else
+		publish.tls = {
+			cafile = cafile,
+			capath = capath,
+			certfile = certfile,
+			keyfile = keyfile
+		}
+	end
+end
 
 function publish.multiple(msgs, hostname, port, client_id, keepalive)
 	local client = mqtt.new(client_id)
@@ -23,6 +35,10 @@ function publish.multiple(msgs, hostname, port, client_id, keepalive)
 		end
 	end
 
+	if publish.tls then
+		client:tls_set(publish.tls.cafile, publish.tls.capath,
+			publish.tls.certfile, publish.tls.keyfile)
+	end
 	client:connect(hostname or publish.hostname, port or publish.port,
 		       keepalive or publish.keepalive)
 	client:loop_forever()
