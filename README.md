@@ -38,9 +38,19 @@ Set TLS options to be used for encrypted connection.
 Parameter | Description
 ----------|------------
 cafile    | Path to a file containing trusted CA certificates.
-capath    | path to a directory containing trusted CA certificates.
+capath    | Path to a directory containing trusted CA certificates.
 certfile  | Client certificate for authentication.
 keyfile   | Client private key for authentication.
+
+
+### login_set(username, password)
+
+Set username and login for authentication.
+
+Parameter | Description
+----------|------------
+username  | Provide username.
+password  | Provide clear text password.
 
 
 ### multiple(msgs, hostname, port, client_id, keepalive)
