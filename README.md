@@ -31,6 +31,17 @@ Depends on [lua-mosquitto](https://github.com/flukso/lua-mosquitto).
 
 ## Functions
 
+### tls_set(cafile, capath, certfile, keyfile)
+
+Set TLS options to be used for encrypted connection.
+
+Parameter | Description
+----------|------------
+cafile    | Path to a file containing trusted CA certificates.
+capath    | path to a directory containing trusted CA certificates.
+certfile  | Client certificate for authentication.
+keyfile   | Client private key for authentication.
+
 
 ### multiple(msgs, hostname, port, client_id, keepalive)
 
