@@ -16,6 +16,11 @@ function publish.tls_set(cafile, capath, certfile, keyfile)
 	end
 end
 
+function publish.login_set(username, password)
+	publish.username = username
+	publish.password = password
+end
+
 function publish.multiple(msgs, hostname, port, client_id, keepalive)
 	local client = mqtt.new(client_id)
 
@@ -38,6 +43,9 @@ function publish.multiple(msgs, hostname, port, client_id, keepalive)
 	if publish.tls then
 		client:tls_set(publish.tls.cafile, publish.tls.capath,
 			publish.tls.certfile, publish.tls.keyfile)
+	end
+	if publish.username then
+		client:login_set(publish.username, publish.password)
 	end
 	client:connect(hostname or publish.hostname, port or publish.port,
 		       keepalive or publish.keepalive)
