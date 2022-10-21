@@ -23,8 +23,14 @@ end
 
 function publish.multiple(msgs, hostname, port, client_id, keepalive)
 	local client = mqtt.new(client_id)
+	local retry = true
+	local all_sent = false
 
-	client.ON_CONNECT = function()
+	client.ON_CONNECT = function(success, rc, msg)
+		if not success then
+			retry = false
+			return
+		end
 		for i=1,#msgs do
 			client:publish(msgs[i].topic, msgs[i].payload,
 				       msgs[i].qos, msgs[i].retain)
@@ -36,8 +42,13 @@ function publish.multiple(msgs, hostname, port, client_id, keepalive)
 			msgs = table.remove(msgs, 1)
 		end
 		if msgs == nil or #msgs == 0 then
+			all_sent = true
 			client:disconnect()
 		end
+	end
+
+	client.ON_DISCONNECT = function()
+		retry = false
 	end
 
 	if publish.tls then
@@ -49,8 +60,11 @@ function publish.multiple(msgs, hostname, port, client_id, keepalive)
 	end
 	client:connect(hostname or publish.hostname, port or publish.port,
 		       keepalive or publish.keepalive)
-	client:loop_forever()
+	while retry do
+		client:loop()
+	end
 	client:destroy()
+	return all_sent
 end
 
 function publish.single(topic, payload, qos, retain, hostname, port, client_id,
