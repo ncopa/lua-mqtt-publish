@@ -11,7 +11,7 @@ function publish.tls_set(cafile, capath, certfile, keyfile)
 			cafile = cafile,
 			capath = capath,
 			certfile = certfile,
-			keyfile = keyfile
+			keyfile = keyfile,
 		}
 	end
 end
@@ -23,23 +23,20 @@ end
 
 function publish.multiple(msgs, hostname, port, client_id, keepalive)
 	local client = mqtt.new(client_id)
-	local retry = true
 	local all_sent = false
 
 	client.ON_CONNECT = function(success, rc, msg)
 		if not success then
-			retry = false
 			return
 		end
-		for i=1,#msgs do
-			client:publish(msgs[i].topic, msgs[i].payload,
-				       msgs[i].qos, msgs[i].retain)
+		for i = 1, #msgs do
+			client:publish(msgs[i].topic, msgs[i].payload, msgs[i].qos, msgs[i].retain)
 		end
 	end
 
 	client.ON_PUBLISH = function()
 		if msgs and #msgs > 0 then
-			msgs = table.remove(msgs, 1)
+			table.remove(msgs, 1)
 		end
 		if msgs == nil or #msgs == 0 then
 			all_sent = true
@@ -48,30 +45,31 @@ function publish.multiple(msgs, hostname, port, client_id, keepalive)
 	end
 
 	client.ON_DISCONNECT = function()
-		retry = false
+		client:disconnect() -- in case server does the disconnect
 	end
 
 	if publish.tls then
-		client:tls_set(publish.tls.cafile, publish.tls.capath,
-			publish.tls.certfile, publish.tls.keyfile)
+		client:tls_set(publish.tls.cafile, publish.tls.capath, publish.tls.certfile, publish.tls.keyfile)
 	end
 	if publish.username then
 		client:login_set(publish.username, publish.password)
 	end
-	client:connect(hostname or publish.hostname, port or publish.port,
-		       keepalive or publish.keepalive)
-	while retry do
-		client:loop()
+
+	local status, err, errmsg =
+		client:connect(hostname or publish.hostname, port or publish.port, keepalive or publish.keepalive)
+	if not status then
+		return status, err, errmsg
 	end
-	client:destroy()
-	return all_sent
+	return client:loop_forever()
 end
 
-function publish.single(topic, payload, qos, retain, hostname, port, client_id,
-			keepalive)
+function publish.single(topic, payload, qos, retain, hostname, port, client_id, keepalive)
 	return publish.multiple(
-		{{ topic=topic, payload=payload, qos=qos, retain=retain }},
-		hostname, port, client_id, keepalive
+		{ { topic = topic, payload = payload, qos = qos, retain = retain } },
+		hostname,
+		port,
+		client_id,
+		keepalive
 	)
 end
 
