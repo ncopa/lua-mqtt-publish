@@ -214,7 +214,17 @@ describe("mqtt.publish", function()
 	describe("tls", function()
 		-- without ignore_sigpipe a successful TLS publish kills the test
 		-- runner with SIGPIPE (libmosquitto 2.1)
-		local it_sigpipe = require("mosquitto").ignore_sigpipe and it or pending
+		local mosquitto = require("mosquitto")
+		local it_sigpipe = (mosquitto.ignore_sigpipe and mosquitto.restore_sigpipe) and it or pending
+
+		-- true if SIGPIPE is ignored by this process
+		local function sigpipe_ignored()
+			local f = assert(io.open("/proc/" .. require("posix.unistd").getpid() .. "/status"))
+			local mask = f:read("*a"):match("SigIgn:%s*(%x+)")
+			f:close()
+			-- SIGPIPE is signal 13, bit 12 in the mask
+			return math.floor(tonumber(mask:sub(-4), 16) / 0x1000) % 2 == 1
+		end
 
 		it_sigpipe("connects with the right CA", function()
 			publish.tls_set(broker.ca)
@@ -226,15 +236,29 @@ describe("mqtt.publish", function()
 			assert.is_true(publish.single("tls", "x", 1, false, HOST, broker.cert_port))
 		end)
 
-		it_sigpipe("ignores SIGPIPE", function()
-			assert.is_true(publish.single("tls", "x", 1, false, HOST, broker.port))
-			local f = assert(io.open("/proc/" .. require("posix.unistd").getpid() .. "/status"))
-			local mask = f:read("*a"):match("SigIgn:%s*(%x+)")
-			f:close()
-			-- SIGPIPE is signal 13, bit 12 in the mask
-			assert.equal(1, math.floor(tonumber(mask:sub(-4), 16) / 0x1000) % 2)
+		it_sigpipe("restores SIGPIPE handling after publishing", function()
+			assert.is_false(sigpipe_ignored())
+			publish.tls_set(broker.ca)
+			assert.is_true(publish.single("tls", "x", 1, false, HOST, broker.tls_port))
+			assert.is_false(sigpipe_ignored())
 		end)
 
+		it_sigpipe("restores SIGPIPE handling after an error", function()
+			assert.is_false(sigpipe_ignored())
+			publish.tls_set("/nonexistent/ca.crt")
+			assert.has_error(function()
+				publish.single("tls", "x", 1, false, HOST, broker.tls_port)
+			end)
+			assert.is_false(sigpipe_ignored())
+		end)
+
+		it_sigpipe("keeps SIGPIPE ignored if it already was", function()
+			assert.is_false(mosquitto.ignore_sigpipe())
+			assert.is_true(publish.single("x", "x", 1, false, HOST, broker.port))
+			assert.is_true(sigpipe_ignored())
+			assert.is_true(mosquitto.restore_sigpipe())
+			assert.is_false(sigpipe_ignored())
+		end)
 
 		it("fails with the wrong CA", function()
 			publish.tls_set(broker.other_ca)

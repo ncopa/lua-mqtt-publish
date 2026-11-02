@@ -23,8 +23,11 @@ end
 
 function publish.multiple(msgs, hostname, port, client_id, keepalive)
 	-- libmosquitto can trigger SIGPIPE (e.g. on TLS disconnect), which
-	-- kills the process. Ignore it if lua-mosquitto lets us.
-	if mqtt.ignore_sigpipe then
+	-- kills the process. Ignore it while we talk to the broker, if
+	-- lua-mosquitto lets us put it back afterwards. An ignored SIGPIPE
+	-- would otherwise be inherited by every child process started later.
+	local sigpipe = mqtt.ignore_sigpipe and mqtt.restore_sigpipe
+	if sigpipe then
 		mqtt.ignore_sigpipe()
 	end
 	local client = mqtt.new(client_id)
@@ -94,6 +97,10 @@ function publish.multiple(msgs, hostname, port, client_id, keepalive)
 	-- free the client now instead of waiting for the garbage collector. It
 	-- holds sockets that would otherwise leak into child processes.
 	client:destroy()
+	-- after destroy, which may still write a TLS close_notify
+	if sigpipe then
+		mqtt.restore_sigpipe()
+	end
 	if not ok then
 		error(status, 0)
 	end
