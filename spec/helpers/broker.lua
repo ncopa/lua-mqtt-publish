@@ -145,27 +145,61 @@ function Broker:stop()
 	os.execute("rm -rf '" .. self.dir .. "'")
 end
 
-local sub_counter = 0
+local client_counter = 0
+
+-- Run a lua-mosquitto client until stop() is called from a callback or
+-- the timeout expires. A hand rolled loop is used instead of loop_forever,
+-- which waits a full select timeout after disconnecting.
+local function run_client(self, clean_session, client_id, setup, timeout)
+	local mqtt = require("mosquitto")
+	local client = mqtt.new(client_id, clean_session)
+	local done = false
+	local function stop()
+		if not done then
+			done = true
+			client:disconnect()
+		end
+	end
+	setup(client, stop)
+	client.ON_DISCONNECT = stop
+	assert(client:connect(M.HOST, self.port))
+	local deadline = M.now() + (timeout or 2)
+	while not done and M.now() < deadline do
+		client:loop(10)
+	end
+	if not done then
+		client:disconnect()
+	end
+	client:loop(10)
+	client:destroy()
+	return done
+end
 
 --- Create a persistent subscription on the anonymous listener. Messages
 --- published after this call are queued by the broker and can be fetched
 --- with collect(), so there is no race between subscriber and publisher.
 function Broker:subscribe(topic)
-	sub_counter = sub_counter + 1
-	local args = ("-h %s -p %d -i spec-sub-%d -c -q 2 -t '%s'"):format(M.HOST, self.port, sub_counter, topic or "#")
-	sh("mosquitto_sub " .. args .. " -E")
+	client_counter = client_counter + 1
+	local client_id = "spec-sub-" .. client_counter
+	assert(run_client(self, false, client_id, function(client, stop)
+		client.ON_CONNECT = function()
+			client:subscribe(topic, 2)
+		end
+		client.ON_SUBSCRIBE = stop
+	end))
 	return {
-		--- Fetch up to n queued messages (waits max `timeout` seconds).
+		--- Fetch n queued messages, waiting at most `timeout` seconds.
 		--- Returns a list of { topic=, qos=, retain=, payload= }.
 		collect = function(_, n, timeout)
-			local out = readall(
-				("mosquitto_sub %s -C %d -W %d -F '%%t|%%q|%%r|%%p' 2>/dev/null"):format(args, n, timeout or 2)
-			)
 			local msgs = {}
-			for line in out:gmatch("([^\n]*)\n") do
-				local t, q, r, p = line:match("^([^|]*)|(%d)|(%d)|(.*)$")
-				msgs[#msgs + 1] = { topic = t, qos = tonumber(q), retain = r == "1", payload = p }
-			end
+			run_client(self, false, client_id, function(client, stop)
+				client.ON_MESSAGE = function(_, t, payload, qos, retain)
+					msgs[#msgs + 1] = { topic = t, qos = qos, retain = retain, payload = payload or "" }
+					if #msgs >= n then
+						stop()
+					end
+				end
+			end, timeout)
 			return msgs
 		end,
 	}
@@ -173,17 +207,33 @@ end
 
 --- Read the retained message for a topic, or nil.
 function Broker:retained(topic)
-	local out = readall(
-		("mosquitto_sub -h %s -p %d -t '%s' -C 1 -W 1 --retained-only -F '%%p' 2>/dev/null"):format(
-			M.HOST,
-			self.port,
-			topic
-		)
-	)
-	if out == "" then
-		return nil
-	end
-	return (out:gsub("\n$", ""))
+	client_counter = client_counter + 1
+	-- retained messages are sent right after SUBACK, so once a marker
+	-- message published after SUBACK arrives, all retained have arrived.
+	local marker = "spec-marker/" .. client_counter
+	local payload
+	assert(run_client(self, true, nil, function(client, stop)
+		client.ON_CONNECT = function()
+			client:subscribe(topic, 0)
+		end
+		local subacks = 0
+		client.ON_SUBSCRIBE = function()
+			subacks = subacks + 1
+			if subacks == 1 then
+				client:subscribe(marker, 0)
+			else
+				client:publish(marker, "", 0)
+			end
+		end
+		client.ON_MESSAGE = function(_, t, p, _, retain)
+			if t == marker then
+				stop()
+			elseif retain then
+				payload = p or ""
+			end
+		end
+	end))
+	return payload
 end
 
 return M
