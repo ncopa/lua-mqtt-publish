@@ -30,6 +30,12 @@ function publish.multiple(msgs, hostname, port, client_id, keepalive)
 		if not success then
 			return
 		end
+		if pending == 0 then
+			-- nothing to publish so ON_PUBLISH will never trigger disconnect
+			all_sent = true
+			client:disconnect()
+			return
+		end
 		for i = 1, #msgs do
 			client:publish(msgs[i].topic, msgs[i].payload, msgs[i].qos, msgs[i].retain)
 		end

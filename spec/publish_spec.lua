@@ -150,6 +150,10 @@ describe("mqtt.publish", function()
 			assert.same(copy, msgs)
 		end)
 
+		it("returns for an empty message list", function()
+			assert.is_true(publish.multiple({}, HOST, broker.port))
+		end)
+
 		it("raises on invalid topic", function()
 			assert.has_error(function()
 				publish.multiple({ { topic = "ok" }, { topic = "bad/#" } }, HOST, broker.port)
