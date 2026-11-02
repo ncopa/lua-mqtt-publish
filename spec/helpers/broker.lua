@@ -2,9 +2,12 @@
 -- (anonymous, password auth, TLS, TLS with client certificates) and
 -- provides subscribers that can verify what the broker actually received.
 
+local fcntl = require("posix.fcntl")
+local signal = require("posix.signal")
 local socket = require("posix.sys.socket")
 local ptime = require("posix.time")
 local unistd = require("posix.unistd")
+local wait = require("posix.sys.wait")
 
 local M = {}
 
@@ -106,7 +109,6 @@ function M.start()
 			-- queue QoS 0 for offline persistent subscribers so tests can
 			-- collect them afterwards
 			"queue_qos0_messages true",
-			"pid_file " .. d .. "/mosquitto.pid",
 			"log_dest file " .. d .. "/mosquitto.log",
 			("listener %d %s\nallow_anonymous true"):format(self.port, M.HOST),
 			("listener %d %s\nallow_anonymous false\npassword_file %s/passwd"):format(self.auth_port, M.HOST, d),
@@ -116,11 +118,27 @@ function M.start()
 		}, "\n")
 	)
 
-	-- startup warnings (e.g. deprecated options in newer mosquitto) go to stderr
-	sh(("mosquitto -d -c %s/mosquitto.conf 2>%s/stderr.log"):format(d, d))
+	-- Run mosquitto as a child process rather than daemonized so we know
+	-- its pid, and Ctrl-C reaches it too. Startup warnings (e.g. deprecated
+	-- options in newer mosquitto) go to stderr.log.
+	self.pid = assert(unistd.fork())
+	if self.pid == 0 then
+		local fd = fcntl.open(d .. "/stderr.log", fcntl.O_WRONLY + fcntl.O_CREAT + fcntl.O_TRUNC, 420)
+		if fd then
+			unistd.dup2(fd, 1)
+			unistd.dup2(fd, 2)
+		end
+		unistd.execp("mosquitto", { "-c", d .. "/mosquitto.conf" })
+		unistd._exit(127)
+	end
+
 	for _ = 1, 100 do
 		if port_open(self.port) and port_open(self.cert_port) then
 			return self
+		end
+		if wait.wait(self.pid, wait.WNOHANG) == self.pid then
+			self.pid = nil -- exited
+			break
 		end
 		sleep_ms(50)
 	end
@@ -134,13 +152,10 @@ function M.start()
 end
 
 function Broker:stop()
-	local f = io.open(self.dir .. "/mosquitto.pid")
-	if f then
-		local pid = f:read("*n")
-		f:close()
-		if pid then
-			os.execute("kill " .. pid)
-		end
+	if self.pid then
+		signal.kill(self.pid, signal.SIGTERM)
+		wait.wait(self.pid)
+		self.pid = nil
 	end
 	os.execute("rm -rf '" .. self.dir .. "'")
 end
