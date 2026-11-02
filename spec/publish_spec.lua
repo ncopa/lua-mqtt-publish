@@ -264,6 +264,22 @@ describe("mqtt.publish", function()
 			assert.is_string(msg)
 		end)
 
+		for qos = 0, 1 do
+			it("fails when the broker drops the connection, qos " .. qos, function()
+				-- the broker disconnects us when the oversized message arrives
+				local big = string.rep("x", broker_helper.MAX_PACKET_SIZE + 1)
+				local msgs = {
+					{ topic = "drop/1", payload = "1", qos = qos },
+					{ topic = "drop/2", payload = big, qos = qos },
+					{ topic = "drop/3", payload = "3", qos = qos },
+				}
+				local ok, rc, msg = publish.multiple(msgs, HOST, broker.port)
+				assert.is_nil(ok)
+				assert.is_number(rc)
+				assert.is_string(msg)
+			end)
+		end
+
 		it("fails on unresolvable host", function()
 			assert.is_nil((publish.single("x", "x", 0, false, "nonexistent.invalid", 1883)))
 		end)

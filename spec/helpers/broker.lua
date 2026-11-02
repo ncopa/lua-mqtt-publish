@@ -13,6 +13,8 @@ local M = {}
 
 M.HOST = "127.0.0.1"
 M.USER, M.PASSWORD = "testuser", "testpass"
+-- the broker disconnects clients that send bigger packets
+M.MAX_PACKET_SIZE = 2 * 1024 * 1024
 
 local function sh(cmd)
 	local ok = os.execute(cmd)
@@ -109,6 +111,7 @@ function M.start()
 			-- queue QoS 0 for offline persistent subscribers so tests can
 			-- collect them afterwards
 			"queue_qos0_messages true",
+			"max_packet_size " .. M.MAX_PACKET_SIZE,
 			"log_dest file " .. d .. "/mosquitto.log",
 			("listener %d %s\nallow_anonymous true"):format(self.port, M.HOST),
 			("listener %d %s\nallow_anonymous false\npassword_file %s/passwd"):format(self.auth_port, M.HOST, d),
