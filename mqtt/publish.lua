@@ -24,6 +24,7 @@ end
 function publish.multiple(msgs, hostname, port, client_id, keepalive)
 	local client = mqtt.new(client_id)
 	local all_sent = false
+	local pending = #msgs
 
 	client.ON_CONNECT = function(success, rc, msg)
 		if not success then
@@ -35,10 +36,8 @@ function publish.multiple(msgs, hostname, port, client_id, keepalive)
 	end
 
 	client.ON_PUBLISH = function()
-		if msgs and #msgs > 0 then
-			table.remove(msgs, 1)
-		end
-		if msgs == nil or #msgs == 0 then
+		pending = pending - 1
+		if pending <= 0 then
 			all_sent = true
 			client:disconnect()
 		end

@@ -143,6 +143,13 @@ describe("mqtt.publish", function()
 			assert.same(expected, got)
 		end)
 
+		it("does not modify the caller's message list", function()
+			local msgs = { { topic = "nomod/1", payload = "a" }, { topic = "nomod/2", payload = "b", qos = 1 } }
+			local copy = { { topic = "nomod/1", payload = "a" }, { topic = "nomod/2", payload = "b", qos = 1 } }
+			assert.is_true(publish.multiple(msgs, HOST, broker.port))
+			assert.same(copy, msgs)
+		end)
+
 		it("raises on invalid topic", function()
 			assert.has_error(function()
 				publish.multiple({ { topic = "ok" }, { topic = "bad/#" } }, HOST, broker.port)
