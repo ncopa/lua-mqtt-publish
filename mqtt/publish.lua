@@ -57,10 +57,13 @@ function publish.multiple(msgs, hostname, port, client_id, keepalive)
 
 	local status, err, errmsg =
 		client:connect(hostname or publish.hostname, port or publish.port, keepalive or publish.keepalive)
-	if not status then
-		return status, err, errmsg
+	if status then
+		status, err, errmsg = client:loop_forever()
 	end
-	return client:loop_forever()
+	-- free the client now instead of waiting for the garbage collector. It
+	-- holds sockets that would otherwise leak into child processes.
+	client:destroy()
+	return status, err, errmsg
 end
 
 function publish.single(topic, payload, qos, retain, hostname, port, client_id, keepalive)
