@@ -86,6 +86,22 @@ local function gen_certs(dir)
 	sh(("cd %s && openssl req -x509 %s -keyout other-ca.key -out other-ca.crt -days 1 -subj /CN=other-ca%s"):format(dir, key, q))
 end
 
+-- Run mosquitto as a child process rather than daemonized so we know its
+-- pid, and Ctrl-C reaches it too. Startup warnings go to <name>.stderr.
+local function spawn_broker(dir, name)
+	local pid = assert(unistd.fork())
+	if pid == 0 then
+		local fd = fcntl.open(dir .. "/" .. name .. ".stderr", fcntl.O_WRONLY + fcntl.O_CREAT + fcntl.O_TRUNC, 420)
+		if fd then
+			unistd.dup2(fd, 1)
+			unistd.dup2(fd, 2)
+		end
+		unistd.execp("mosquitto", { "-c", dir .. "/" .. name .. ".conf" })
+		unistd._exit(127)
+	end
+	return pid
+end
+
 local Broker = {}
 Broker.__index = Broker
 
@@ -103,62 +119,83 @@ function M.start()
 	sh(("chmod 600 %s/passwd"):format(d))
 
 	local tls = ("cafile %s\ncertfile %s/server.crt\nkeyfile %s/server.key\n"):format(self.ca, d, d)
+	local common = {
+		"persistence false",
+		-- queue QoS 0 for offline persistent subscribers so tests can
+		-- collect them afterwards
+		"queue_qos0_messages true",
+		"max_packet_size " .. M.MAX_PACKET_SIZE,
+	}
+	-- The password protected listener runs in a separate broker. Mixing
+	-- it with anonymous listeners would need per_listener_settings, which
+	-- in mosquitto 2.0 stops messages from being queued for offline
+	-- clients.
 	writefile(
 		d .. "/mosquitto.conf",
-		table.concat({
-			"per_listener_settings true",
-			"persistence false",
-			-- queue QoS 0 for offline persistent subscribers so tests can
-			-- collect them afterwards
-			"queue_qos0_messages true",
-			"max_packet_size " .. M.MAX_PACKET_SIZE,
-			"log_dest file " .. d .. "/mosquitto.log",
-			("listener %d %s\nallow_anonymous true"):format(self.port, M.HOST),
-			("listener %d %s\nallow_anonymous false\npassword_file %s/passwd"):format(self.auth_port, M.HOST, d),
-			("listener %d %s\nallow_anonymous true\n%s"):format(self.tls_port, M.HOST, tls),
-			("listener %d %s\nallow_anonymous true\nrequire_certificate true\n%s"):format(self.cert_port, M.HOST, tls),
-			"",
-		}, "\n")
+		table.concat(common, "\n")
+			.. "\n"
+			.. table.concat({
+				"log_dest file " .. d .. "/mosquitto.log",
+				"allow_anonymous true",
+				("listener %d %s"):format(self.port, M.HOST),
+				("listener %d %s\n%s"):format(self.tls_port, M.HOST, tls),
+				("listener %d %s\nrequire_certificate true\n%s"):format(self.cert_port, M.HOST, tls),
+				"",
+			}, "\n")
+	)
+	writefile(
+		d .. "/auth.conf",
+		table.concat(common, "\n")
+			.. "\n"
+			.. table.concat({
+				"log_dest file " .. d .. "/auth.log",
+				"allow_anonymous false",
+				"password_file " .. d .. "/passwd",
+				("listener %d %s"):format(self.auth_port, M.HOST),
+				"",
+			}, "\n")
 	)
 
-	-- Run mosquitto as a child process rather than daemonized so we know
-	-- its pid, and Ctrl-C reaches it too. Startup warnings (e.g. deprecated
-	-- options in newer mosquitto) go to stderr.log.
-	self.pid = assert(unistd.fork())
-	if self.pid == 0 then
-		local fd = fcntl.open(d .. "/stderr.log", fcntl.O_WRONLY + fcntl.O_CREAT + fcntl.O_TRUNC, 420)
-		if fd then
-			unistd.dup2(fd, 1)
-			unistd.dup2(fd, 2)
-		end
-		unistd.execp("mosquitto", { "-c", d .. "/mosquitto.conf" })
-		unistd._exit(127)
+	self.pids = {}
+	local brokers = { { "mosquitto", self.port }, { "auth", self.auth_port } }
+	for _, b in ipairs(brokers) do
+		self.pids[#self.pids + 1] = spawn_broker(d, b[1])
 	end
 
+	local ready = 0
 	for _ = 1, 100 do
-		if port_open(self.port) and port_open(self.cert_port) then
-			return self
+		ready = 0
+		for i, b in ipairs(brokers) do
+			if port_open(b[2]) then
+				ready = ready + 1
+			elseif wait.wait(self.pids[i], wait.WNOHANG) == self.pids[i] then
+				self.pids[i] = false -- exited
+			end
 		end
-		if wait.wait(self.pid, wait.WNOHANG) == self.pid then
-			self.pid = nil -- exited
-			break
+		if ready == #brokers then
+			return self
 		end
 		sleep_ms(50)
 	end
-	local f = io.open(d .. "/stderr.log")
-	local msg = f and f:read("*a") or ""
-	if f then
-		f:close()
+	local msg = ""
+	for _, b in ipairs(brokers) do
+		local f = io.open(d .. "/" .. b[1] .. ".stderr")
+		if f then
+			msg = msg .. f:read("*a")
+			f:close()
+		end
 	end
 	self:stop()
 	error("mosquitto did not start: " .. msg)
 end
 
 function Broker:stop()
-	if self.pid then
-		signal.kill(self.pid, signal.SIGTERM)
-		wait.wait(self.pid)
-		self.pid = nil
+	for i, pid in ipairs(self.pids or {}) do
+		if pid then
+			signal.kill(pid, signal.SIGTERM)
+			wait.wait(pid)
+			self.pids[i] = false
+		end
 	end
 	os.execute("rm -rf '" .. self.dir .. "'")
 end
