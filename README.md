@@ -75,10 +75,11 @@ connection, the code and message are from the CONNACK, for example
 Raises an error on invalid input, like a topic with wildcards or a CA
 file that does not exist. The `msgs` table is not modified.
 
-SIGPIPE is ignored for the whole process if the installed lua-mosquitto
-provides `ignore_sigpipe()`. Without it, a TLS publish with
-libmosquitto 2.1 or newer can kill the process, and you need to ignore
-SIGPIPE yourself (for example with luaposix).
+While publishing, SIGPIPE is ignored and the previous handling is
+restored afterwards, if the installed lua-mosquitto provides
+`ignore_sigpipe()` and `restore_sigpipe()`. Without them, a TLS publish
+with libmosquitto 2.1 or newer can kill the process, and you need to
+ignore SIGPIPE yourself (for example with luaposix).
 
 
 ### single(topic, payload, qos, retain, hostname, port, client_id, keepalive)
