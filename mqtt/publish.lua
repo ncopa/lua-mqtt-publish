@@ -58,7 +58,10 @@ function publish.multiple(msgs, hostname, port, client_id, keepalive)
 	local status, err, errmsg =
 		client:connect(hostname or publish.hostname, port or publish.port, keepalive or publish.keepalive)
 	if status then
-		status, err, errmsg = client:loop_forever()
+		-- After a clean disconnect, loop_forever runs one more iteration that
+		-- waits the full select timeout (1s by default) before it returns.
+		-- Use a short timeout so publishing does not stall for a second.
+		status, err, errmsg = client:loop_forever(10)
 	end
 	-- free the client now instead of waiting for the garbage collector. It
 	-- holds sockets that would otherwise leak into child processes.

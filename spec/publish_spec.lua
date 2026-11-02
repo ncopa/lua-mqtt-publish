@@ -89,6 +89,12 @@ describe("mqtt.publish", function()
 			assert.equal(payload, sub:collect(1, 5)[1].payload)
 		end)
 
+		it("returns promptly after the message is sent", function()
+			local start = broker_helper.now()
+			assert.is_true(publish.single("fast", "x", 1, false, HOST, broker.port))
+			assert.is_true(broker_helper.now() - start < 0.5)
+		end)
+
 		it("uses publish.hostname and publish.port defaults", function()
 			local sub = broker:subscribe("defaults")
 			publish.hostname = HOST
