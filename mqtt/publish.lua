@@ -25,9 +25,13 @@ function publish.multiple(msgs, hostname, port, client_id, keepalive)
 	local client = mqtt.new(client_id)
 	local all_sent = false
 	local pending = #msgs
+	local fail_rc, fail_msg
 
 	client.ON_CONNECT = function(success, rc, msg)
 		if not success then
+			-- connection refused, e.g. bad credentials. The broker closes
+			-- the connection and ON_DISCONNECT stops the loop.
+			fail_rc, fail_msg = rc, msg
 			return
 		end
 		if pending == 0 then
@@ -49,7 +53,10 @@ function publish.multiple(msgs, hostname, port, client_id, keepalive)
 		end
 	end
 
-	client.ON_DISCONNECT = function()
+	client.ON_DISCONNECT = function(success, rc, msg)
+		if not all_sent and not fail_rc then
+			fail_rc, fail_msg = rc, msg
+		end
 		client:disconnect() -- in case server does the disconnect
 	end
 
@@ -67,6 +74,9 @@ function publish.multiple(msgs, hostname, port, client_id, keepalive)
 		-- waits the full select timeout (1s by default) before it returns.
 		-- Use a short timeout so publishing does not stall for a second.
 		status, err, errmsg = client:loop_forever(10)
+	end
+	if status and not all_sent then
+		status, err, errmsg = nil, fail_rc, fail_msg
 	end
 	-- free the client now instead of waiting for the garbage collector. It
 	-- holds sockets that would otherwise leak into child processes.
