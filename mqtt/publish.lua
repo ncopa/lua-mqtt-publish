@@ -22,6 +22,11 @@ function publish.login_set(username, password)
 end
 
 function publish.multiple(msgs, hostname, port, client_id, keepalive)
+	-- libmosquitto can trigger SIGPIPE (e.g. on TLS disconnect), which
+	-- kills the process. Ignore it if lua-mosquitto lets us.
+	if mqtt.ignore_sigpipe then
+		mqtt.ignore_sigpipe()
+	end
 	local client = mqtt.new(client_id)
 	local all_sent = false
 	local pending = #msgs

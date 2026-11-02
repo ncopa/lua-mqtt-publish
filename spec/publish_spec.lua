@@ -204,6 +204,29 @@ describe("mqtt.publish", function()
 	end)
 
 	describe("tls", function()
+		-- without ignore_sigpipe a successful TLS publish kills the test
+		-- runner with SIGPIPE (libmosquitto 2.1)
+		local it_sigpipe = require("mosquitto").ignore_sigpipe and it or pending
+
+		it_sigpipe("connects with the right CA", function()
+			publish.tls_set(broker.ca)
+			assert.is_true(publish.single("tls", "x", 1, false, HOST, broker.tls_port))
+		end)
+
+		it_sigpipe("authenticates with a client certificate", function()
+			publish.tls_set(broker.ca, nil, broker.client_cert, broker.client_key)
+			assert.is_true(publish.single("tls", "x", 1, false, HOST, broker.cert_port))
+		end)
+
+		it_sigpipe("ignores SIGPIPE", function()
+			assert.is_true(publish.single("tls", "x", 1, false, HOST, broker.port))
+			local f = assert(io.open("/proc/" .. require("posix.unistd").getpid() .. "/status"))
+			local mask = f:read("*a"):match("SigIgn:%s*(%x+)")
+			f:close()
+			-- SIGPIPE is signal 13, bit 12 in the mask
+			assert.equal(1, math.floor(tonumber(mask:sub(-4), 16) / 0x1000) % 2)
+		end)
+
 
 		it("fails with the wrong CA", function()
 			publish.tls_set(broker.other_ca)
