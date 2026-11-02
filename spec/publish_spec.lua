@@ -3,8 +3,16 @@ require("busted.runner")()
 local broker_helper = require("helpers.broker")
 local HOST = broker_helper.HOST
 
+local broker, publish
+
+-- fail with the test name instead of hanging forever
+require("helpers.watchdog").start(tonumber(os.getenv("SPEC_TIMEOUT")) or 10, function()
+	if broker then
+		broker:stop()
+	end
+end)
+
 describe("mqtt.publish", function()
-	local broker, publish
 
 	setup(function()
 		broker = broker_helper.start()
