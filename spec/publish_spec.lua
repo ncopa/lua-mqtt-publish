@@ -16,6 +16,17 @@ describe("mqtt.publish", function()
 		end
 	end)
 
+	-- number of open file descriptors, to detect leaked clients
+	local function open_fds()
+		local f = assert(io.popen("ls /proc/" .. require("posix.unistd").getpid() .. "/fd"))
+		local n = 0
+		for _ in f:lines() do
+			n = n + 1
+		end
+		f:close()
+		return n
+	end
+
 	before_each(function()
 		-- fresh module for every test so defaults, tls and login settings
 		-- do not leak between tests
@@ -154,13 +165,15 @@ describe("mqtt.publish", function()
 			assert.is_true(publish.multiple({}, HOST, broker.port))
 		end)
 
-		it("raises on invalid topic", function()
+		it("raises on invalid topic without leaking the client", function()
+			local fds = open_fds()
 			assert.has_error(function()
 				publish.multiple({ { topic = "ok" }, { topic = "bad/#" } }, HOST, broker.port)
-			end)
+			end, "Invalid input")
 			assert.has_error(function()
 				publish.multiple({ { payload = "no topic" } }, HOST, broker.port)
 			end)
+			assert.equal(fds, open_fds())
 		end)
 	end)
 
@@ -202,11 +215,13 @@ describe("mqtt.publish", function()
 			assert.is_nil((publish.single("tls", "x", 1, false, HOST, broker.cert_port)))
 		end)
 
-		it("raises on missing CA file", function()
+		it("raises on missing CA file without leaking the client", function()
+			local fds = open_fds()
 			publish.tls_set("/nonexistent/ca.crt")
 			assert.has_error(function()
 				publish.single("tls", "x", 1, false, HOST, broker.tls_port)
 			end)
+			assert.equal(fds, open_fds())
 		end)
 	end)
 

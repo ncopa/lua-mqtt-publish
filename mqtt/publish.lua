@@ -26,6 +26,7 @@ function publish.multiple(msgs, hostname, port, client_id, keepalive)
 	local all_sent = false
 	local pending = #msgs
 	local fail_rc, fail_msg
+	local raised
 
 	client.ON_CONNECT = function(success, rc, msg)
 		if not success then
@@ -41,7 +42,14 @@ function publish.multiple(msgs, hostname, port, client_id, keepalive)
 			return
 		end
 		for i = 1, #msgs do
-			client:publish(msgs[i].topic, msgs[i].payload, msgs[i].qos, msgs[i].retain)
+			-- don't let errors unwind through the C library's loop. Save it
+			-- and raise it once the client is cleaned up.
+			local ok, e = pcall(client.publish, client, msgs[i].topic, msgs[i].payload, msgs[i].qos, msgs[i].retain)
+			if not ok then
+				raised = e
+				client:disconnect()
+				return
+			end
 		end
 	end
 
@@ -60,27 +68,36 @@ function publish.multiple(msgs, hostname, port, client_id, keepalive)
 		client:disconnect() -- in case server does the disconnect
 	end
 
-	if publish.tls then
-		client:tls_set(publish.tls.cafile, publish.tls.capath, publish.tls.certfile, publish.tls.keyfile)
-	end
-	if publish.username then
-		client:login_set(publish.username, publish.password)
-	end
+	local ok, status, err, errmsg = pcall(function()
+		if publish.tls then
+			client:tls_set(publish.tls.cafile, publish.tls.capath, publish.tls.certfile, publish.tls.keyfile)
+		end
+		if publish.username then
+			client:login_set(publish.username, publish.password)
+		end
 
-	local status, err, errmsg =
-		client:connect(hostname or publish.hostname, port or publish.port, keepalive or publish.keepalive)
-	if status then
-		-- After a clean disconnect, loop_forever runs one more iteration that
-		-- waits the full select timeout (1s by default) before it returns.
-		-- Use a short timeout so publishing does not stall for a second.
-		status, err, errmsg = client:loop_forever(10)
+		local status, err, errmsg =
+			client:connect(hostname or publish.hostname, port or publish.port, keepalive or publish.keepalive)
+		if status then
+			-- After a clean disconnect, loop_forever runs one more iteration that
+			-- waits the full select timeout (1s by default) before it returns.
+			-- Use a short timeout so publishing does not stall for a second.
+			status, err, errmsg = client:loop_forever(10)
+		end
+		return status, err, errmsg
+	end)
+	-- free the client now instead of waiting for the garbage collector. It
+	-- holds sockets that would otherwise leak into child processes.
+	client:destroy()
+	if not ok then
+		error(status, 0)
+	end
+	if raised then
+		error(raised, 0)
 	end
 	if status and not all_sent then
 		status, err, errmsg = nil, fail_rc, fail_msg
 	end
-	-- free the client now instead of waiting for the garbage collector. It
-	-- holds sockets that would otherwise leak into child processes.
-	client:destroy()
 	return status, err, errmsg
 end
 
